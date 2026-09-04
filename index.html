@@ -1,0 +1,1120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ModemJS I/O Lab v0.1</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#101215; --panel:#171b20; --panel2:#20262d; --text:#e8edf2;
+    --muted:#9aa7b4; --border:#313943; --good:#62d394; --warn:#f6c85f;
+    --bad:#ff7b72; --accent:#78a9ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+  header{padding:20px 24px 12px;border-bottom:1px solid var(--border);background:#0d0f12;position:sticky;top:0;z-index:4}
+  h1{font-size:22px;margin:0 0 4px}
+  h2{font-size:16px;margin:0 0 12px}
+  p{margin:6px 0}
+  main{max-width:1320px;margin:0 auto;padding:18px;display:grid;gap:16px}
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:15px}
+  .sub{background:var(--panel2);border:1px solid var(--border);border-radius:9px;padding:11px}
+  label{display:block;color:var(--muted);font-size:12px;margin:8px 0 4px}
+  input,select,button{font:inherit}
+  input[type="number"],select{width:100%;padding:8px 9px;background:#0f1317;color:var(--text);border:1px solid var(--border);border-radius:7px}
+  input[type="range"]{width:100%}
+  button{padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:#252c34;color:var(--text);cursor:pointer}
+  button:hover{border-color:#52606d}
+  button.primary{background:#254d85;border-color:#3c6eaa}
+  button.danger{background:#652c32;border-color:#874047}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .grow{flex:1 1 240px}
+  .pill{display:inline-block;padding:3px 7px;border-radius:999px;background:#29313a;color:var(--muted);font-size:12px}
+  .ok{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)} .muted{color:var(--muted)}
+  .metric{font-size:24px;font-variant-numeric:tabular-nums}
+  .metric small{font-size:11px;color:var(--muted)}
+  .meter{height:10px;background:#0d1115;border-radius:20px;overflow:hidden;border:1px solid var(--border)}
+  .meter>div{height:100%;width:0%;background:linear-gradient(90deg,#4da3ff,#62d394,#f6c85f,#ff7b72)}
+  canvas{width:100%;height:260px;background:#090c0f;border:1px solid var(--border);border-radius:8px;display:block}
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  td,th{padding:6px 8px;border-bottom:1px solid var(--border);text-align:left}
+  th{color:var(--muted);font-weight:600}
+  code{background:#0c1014;padding:2px 4px;border-radius:4px}
+  #log{height:180px;overflow:auto;background:#090c0f;border:1px solid var(--border);border-radius:8px;padding:9px;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}
+  .tiny{font-size:11px;color:var(--muted)}
+  .checkbox{display:flex;align-items:center;gap:7px;margin-top:8px}
+  .checkbox input{width:auto}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} header{position:static}}
+</style>
+</head>
+<body>
+<header>
+  <h1>ModemJS I/O Lab <span class="pill">v0.1</span></h1>
+  <p class="muted">Audio I/O diagnostics and near-ultrasonic link testing. No packet modem yet.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1. Browser and device assertion</h2>
+    <div class="grid3">
+      <div class="sub"><b>Context</b><div id="secureState" class="muted">checking…</div></div>
+      <div class="sub"><b>Audio APIs</b><div id="apiState" class="muted">checking…</div></div>
+      <div class="sub"><b>Minimum link capability</b><div id="capabilityState" class="muted">not enumerated</div></div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="refreshBtn">Refresh devices</button>
+      <button id="micPermissionBtn">Request microphone access</button>
+      <button id="outputPermissionBtn">Choose/authorize speaker</button>
+      <span id="deviceCount" class="muted"></span>
+    </div>
+    <p class="tiny">Device labels and non-default outputs may remain hidden until permission is granted. For best speaker-selection support use a current Chromium-based browser over HTTPS or localhost.</p>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>2. Instance / role</h2>
+      <div class="row">
+        <div class="grow">
+          <label>Role</label>
+          <select id="roleSelect">
+            <option value="tx">TX only — speaker required</option>
+            <option value="rx">RX only — microphone required</option>
+            <option value="both">TX + RX — diagnostic/lab mode</option>
+          </select>
+        </div>
+        <div class="grow">
+          <label>This tab</label>
+          <div id="instanceId" class="pill"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="startBtn" class="primary">Start audio engine</button>
+        <button id="stopBtn" class="danger" disabled>Stop</button>
+      </div>
+      <p class="tiny">For a one-laptop test, open this file in two tabs/windows: set one to TX-only and the other to RX-only. The audio still travels through the physical speaker/microphone path.</p>
+      <div id="peerState" class="muted">Local ModemJS instances: 1</div>
+    </div>
+
+    <div class="card">
+      <h2>3. Audio devices</h2>
+      <label>Microphone / input</label>
+      <select id="micSelect"><option value="">Default / unavailable</option></select>
+      <label>Speaker / output</label>
+      <select id="speakerSelect"><option value="">System default</option></select>
+      <div class="checkbox">
+        <input id="rawAudio" type="checkbox" checked>
+        <span>Request raw-ish microphone input (AEC / noise suppression / AGC off when supported)</span>
+      </div>
+      <div id="trackSettings" class="tiny" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>4. Transmitter controls</h2>
+      <div class="grid2">
+        <div>
+          <label>Speaker software volume: <span id="txGainLabel">10%</span></label>
+          <input id="txGain" type="range" min="0" max="1" value="0.10" step="0.01">
+        </div>
+        <div>
+          <label>Single tone frequency (Hz)</label>
+          <input id="toneFreq" type="number" value="18500" min="100" max="23000" step="10">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="toneStartBtn">Start continuous tone</button>
+        <button id="toneStopBtn" disabled>Stop tone</button>
+      </div>
+
+      <h3 style="font-size:14px;margin:16px 0 6px">Chirp probe</h3>
+      <div class="grid3">
+        <div><label>Start Hz</label><input id="chirpStart" type="number" value="17000"></div>
+        <div><label>End Hz</label><input id="chirpEnd" type="number" value="20000"></div>
+        <div><label>Duration ms</label><input id="chirpDuration" type="number" value="40" min="5" max="2000"></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="chirpBtn">Send chirp</button>
+        <button id="probeBtn">Send chirp + 4-FSK probe</button>
+      </div>
+
+      <h3 style="font-size:14px;margin:16px 0 6px">4-FSK test frequencies</h3>
+      <div class="grid2">
+        <div><label>F0 / 00 (Hz)</label><input class="fskFreq" data-index="0" type="number" value="17600"></div>
+        <div><label>F1 / 01 (Hz)</label><input class="fskFreq" data-index="1" type="number" value="18200"></div>
+        <div><label>F2 / 10 (Hz)</label><input class="fskFreq" data-index="2" type="number" value="18800"></div>
+        <div><label>F3 / 11 (Hz)</label><input class="fskFreq" data-index="3" type="number" value="19400"></div>
+      </div>
+      <p class="tiny">Probe pattern: chirp → guard interval → F0, F1, F2, F3 twice. This is for channel testing only; it is not packet framing yet.</p>
+    </div>
+
+    <div class="card">
+      <h2>5. Receiver controls</h2>
+      <label>Microphone software sensitivity: <span id="rxGainLabel">0 dB</span></label>
+      <input id="rxGain" type="range" min="-30" max="30" value="0" step="1">
+      <div class="grid2">
+        <div><label>Analysis band start (Hz)</label><input id="bandStart" type="number" value="16000" min="0" max="24000"></div>
+        <div><label>Analysis band end (Hz)</label><input id="bandEnd" type="number" value="21000" min="0" max="24000"></div>
+      </div>
+      <label>FFT size</label>
+      <select id="fftSize">
+        <option>4096</option><option>8192</option><option selected>16384</option><option>32768</option>
+      </select>
+
+      <div class="grid3" style="margin-top:14px">
+        <div class="sub"><div class="muted">RMS</div><div id="rmsMetric" class="metric">— <small>dBFS</small></div></div>
+        <div class="sub"><div class="muted">Peak</div><div id="peakMetric" class="metric">— <small>dBFS</small></div></div>
+        <div class="sub"><div class="muted">Dominant</div><div id="freqMetric" class="metric">— <small>Hz</small></div></div>
+        <div class="sub"><div class="muted">Tone level</div><div id="toneMetric" class="metric">— <small>dBFS</small></div></div>
+        <div class="sub"><div class="muted">Noise floor</div><div id="noiseMetric" class="metric">— <small>dBFS</small></div></div>
+        <div class="sub"><div class="muted">SNR estimate</div><div id="snrMetric" class="metric">— <small>dB</small></div></div>
+      </div>
+
+      <label>Input level</label>
+      <div class="meter"><div id="levelBar"></div></div>
+
+      <h3 style="font-size:14px;margin:16px 0 6px">4-FSK detector</h3>
+      <table>
+        <thead><tr><th>Symbol</th><th>Frequency</th><th>Level</th></tr></thead>
+        <tbody>
+          <tr><td>00 / F0</td><td id="fskHz0">17600 Hz</td><td id="fskDb0">—</td></tr>
+          <tr><td>01 / F1</td><td id="fskHz1">18200 Hz</td><td id="fskDb1">—</td></tr>
+          <tr><td>10 / F2</td><td id="fskHz2">18800 Hz</td><td id="fskDb2">—</td></tr>
+          <tr><td>11 / F3</td><td id="fskHz3">19400 Hz</td><td id="fskDb3">—</td></tr>
+        </tbody>
+      </table>
+      <p>Strongest FSK symbol: <b id="fskWinner">—</b></p>
+      <div class="row">
+        <button id="measureBtn">Measure link for 5 s</button>
+        <span id="measurementResult" class="muted"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>6. Channel impairment emulator</h2>
+    <p class="muted">Applies controlled disturbances to the transmitted test signal before it reaches the selected speaker. This makes repeatable receiver-side robustness tests possible.</p>
+
+    <div class="row">
+      <div class="grow">
+        <label>Preset</label>
+        <select id="impairPreset">
+          <option value="clean">Clean / bypass</option>
+          <option value="mild">Mild room</option>
+          <option value="echo">Strong echo / multipath</option>
+          <option value="noisy">Low SNR</option>
+          <option value="phase">Phase / delay stress</option>
+          <option value="fade">Amplitude fading</option>
+          <option value="clip">Clipping / overload</option>
+          <option value="band">Band-limited channel</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="grow">
+        <label>Emulator state</label>
+        <div id="impairState" class="pill">Clean</div>
+      </div>
+    </div>
+
+    <div class="grid3" style="margin-top:10px">
+      <div class="sub">
+        <b>Amplitude / level</b>
+        <label>Channel attenuation: <span id="attLabel">0 dB</span></label>
+        <input id="channelAtt" type="range" min="-60" max="12" value="0" step="1">
+
+        <label>Slow fading depth: <span id="fadeDepthLabel">0 dB</span></label>
+        <input id="fadeDepth" type="range" min="0" max="30" value="0" step="1">
+
+        <label>Fading rate (Hz)</label>
+        <input id="fadeRate" type="number" min="0.01" max="20" value="0.5" step="0.01">
+      </div>
+
+      <div class="sub">
+        <b>Echo / multipath</b>
+        <label>Echo 1 delay (ms)</label>
+        <input id="echo1Delay" type="number" min="0" max="500" value="0" step="0.1">
+        <label>Echo 1 level (dB)</label>
+        <input id="echo1Gain" type="number" min="-60" max="0" value="-60" step="1">
+
+        <label>Echo 2 delay (ms)</label>
+        <input id="echo2Delay" type="number" min="0" max="500" value="0" step="0.1">
+        <label>Echo 2 level (dB)</label>
+        <input id="echo2Gain" type="number" min="-60" max="0" value="-60" step="1">
+      </div>
+
+      <div class="sub">
+        <b>Phase / timing</b>
+        <label>Phase error at reference frequency (degrees)</label>
+        <input id="phaseDeg" type="number" min="-180" max="180" value="0" step="1">
+        <label>Reference frequency (Hz)</label>
+        <input id="phaseRef" type="number" min="100" max="23000" value="18500" step="10">
+        <p class="tiny">Implemented as an equivalent sub-cycle time delay at the reference frequency. This creates a frequency-dependent phase slope, as a real propagation/timing error would.</p>
+
+        <label>Frequency offset (Hz)</label>
+        <input id="freqOffset" type="number" min="-1000" max="1000" value="0" step="1">
+      </div>
+    </div>
+
+    <div class="grid3" style="margin-top:12px">
+      <div class="sub">
+        <b>Additive noise</b>
+        <label>Noise level: <span id="noiseGainLabel">Off</span></label>
+        <input id="noiseGain" type="range" min="-90" max="-10" value="-90" step="1">
+        <p class="tiny">Broadband pseudo-random noise is mixed into the transmitted waveform.</p>
+      </div>
+
+      <div class="sub">
+        <b>Band limiting</b>
+        <label>High-pass cutoff (Hz)</label>
+        <input id="hpCut" type="number" min="20" max="22000" value="20" step="10">
+        <label>Low-pass cutoff (Hz)</label>
+        <input id="lpCut" type="number" min="100" max="23000" value="23000" step="10">
+      </div>
+
+      <div class="sub">
+        <b>Non-linearity</b>
+        <label>Soft clipping drive: <span id="clipDriveLabel">Off</span></label>
+        <input id="clipDrive" type="range" min="1" max="20" value="1" step="0.5">
+        <p class="tiny">Useful for testing overdriven speakers, microphone front ends, AGC-like compression effects, and FSK harmonic contamination.</p>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <button id="applyImpairBtn">Apply impairments</button>
+      <button id="resetImpairBtn">Reset to clean</button>
+      <span id="impairSummary" class="tiny"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>7. Receiver spectrum</h2>
+    <canvas id="spectrum" width="1200" height="320"></canvas>
+    <div class="row tiny">
+      <span id="sampleRateLabel">Sample rate: —</span>
+      <span id="nyquistLabel">Nyquist: —</span>
+      <span id="binLabel">FFT resolution: —</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>8. Event log</h2>
+    <div class="row" style="margin-bottom:8px"><button id="clearLogBtn">Clear log</button></div>
+    <div id="log"></div>
+  </section>
+
+  <audio id="outputAudio" autoplay playsinline style="display:none"></audio>
+</main>
+
+<script>
+(() => {
+'use strict';
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+const dbToGain = db => Math.pow(10, db/20);
+const ampToDb = a => a > 0 ? 20*Math.log10(a) : -120;
+const fmt = (v,n=1) => Number.isFinite(v) ? v.toFixed(n) : '—';
+
+const state = {
+  ctx:null, txDest:null, txGain:null, outputAudio:$('#outputAudio'),
+  channelInput:null, channelDry:null, channelAtt:null, channelPhaseDelay:null,
+  echo1Delay:null, echo1Gain:null, echo2Delay:null, echo2Gain:null,
+  noiseSource:null, noiseGain:null, hpFilter:null, lpFilter:null, clipper:null,
+  fadeOsc:null, fadeGain:null,
+  micStream:null, micSource:null, rxGain:null, analyser:null,
+  animationId:null, continuousOsc:null, started:false,
+  latestMetrics:null, selectedOutputId:'',
+  measuring:false, measureSamples:[],
+  peers:new Map()
+};
+
+const instanceId = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)).slice(0,8);
+$('#instanceId').textContent = instanceId;
+
+function log(msg, level='info'){
+  const t = new Date().toLocaleTimeString();
+  const prefix = level==='error'?'ERROR':level==='warn'?'WARN':'INFO';
+  const el = $('#log');
+  el.textContent += `[${t}] ${prefix} ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(el, text, cls='muted'){
+  el.textContent = text; el.className = cls;
+}
+
+function assertBrowser(){
+  setStatus($('#secureState'),
+    isSecureContext ? 'Secure context: yes' : 'Secure context: no — microphone/output selection may be blocked',
+    isSecureContext ? 'ok' : 'bad');
+
+  const md = navigator.mediaDevices;
+  const bits = [
+    ['getUserMedia', !!md?.getUserMedia],
+    ['enumerateDevices', !!md?.enumerateDevices],
+    ['selectAudioOutput', !!md?.selectAudioOutput],
+    ['setSinkId', 'setSinkId' in HTMLMediaElement.prototype]
+  ];
+  $('#apiState').innerHTML = bits.map(([n,ok]) =>
+    `<span class="${ok?'ok':'warn'}">${ok?'✓':'△'} ${n}</span>`).join('<br>');
+}
+
+async function enumerateDevices(){
+  if(!navigator.mediaDevices?.enumerateDevices){
+    setStatus($('#capabilityState'),'enumerateDevices unavailable','bad'); return;
+  }
+  try{
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter(d=>d.kind==='audioinput');
+    const outputs = devices.filter(d=>d.kind==='audiooutput');
+    fillSelect($('#micSelect'), inputs, 'Microphone');
+    fillSelect($('#speakerSelect'), outputs, 'Speaker', true);
+    $('#deviceCount').textContent = `${inputs.length} input(s), ${outputs.length} output(s) visible`;
+
+    let cap = 'No visible audio I/O';
+    let cls = 'bad';
+    if(inputs.length && outputs.length){cap='TX and RX possible';cls='ok'}
+    else if(inputs.length){cap='RX one-way possible';cls='ok'}
+    else if(outputs.length){cap='TX one-way possible';cls='ok'}
+    setStatus($('#capabilityState'),cap,cls);
+    log(`Enumerated ${inputs.length} input(s), ${outputs.length} output(s).`);
+  }catch(e){ log(`${e.name}: ${e.message}`,'error'); }
+}
+
+function fillSelect(sel, devices, fallback, includeDefault=false){
+  const old = sel.value;
+  sel.innerHTML = '';
+  if(includeDefault){
+    const o=document.createElement('option'); o.value=''; o.textContent='System default'; sel.appendChild(o);
+  }
+  if(!devices.length && !includeDefault){
+    const o=document.createElement('option'); o.value=''; o.textContent='Default / unavailable'; sel.appendChild(o);
+  }
+  devices.forEach((d,i)=>{
+    const o=document.createElement('option');
+    o.value=d.deviceId;
+    o.textContent=d.label || `${fallback} ${i+1}`;
+    sel.appendChild(o);
+  });
+  if([...sel.options].some(o=>o.value===old)) sel.value=old;
+}
+
+async function requestMicPermission(){
+  if(!navigator.mediaDevices?.getUserMedia) throw new Error('getUserMedia unavailable');
+  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+  stream.getTracks().forEach(t=>t.stop());
+  log('Microphone permission granted.');
+  await enumerateDevices();
+}
+
+async function chooseOutput(){
+  if(!navigator.mediaDevices?.selectAudioOutput){
+    log('selectAudioOutput() is unavailable; use the system default or an already-permitted output.','warn');
+    return;
+  }
+  try{
+    const dev=await navigator.mediaDevices.selectAudioOutput();
+    state.selectedOutputId=dev.deviceId;
+    await enumerateDevices();
+    $('#speakerSelect').value=dev.deviceId;
+    if(state.started) await routeOutput(dev.deviceId);
+    log(`Authorized output: ${dev.label || dev.deviceId}`);
+  }catch(e){log(`${e.name}: ${e.message}`,'warn')}
+}
+
+function rawConstraints(deviceId){
+  const c={};
+  if(deviceId) c.deviceId={exact:deviceId};
+  if($('#rawAudio').checked){
+    c.echoCancellation=false;
+    c.noiseSuppression=false;
+    c.autoGainControl=false;
+    c.channelCount=1;
+  }
+  return c;
+}
+
+async function createContext(){
+  if(state.ctx) return;
+  state.ctx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+  await state.ctx.resume();
+
+  // TX chain:
+  // generated modem signal -> user TX volume -> impairment emulator -> MediaStreamDestination -> selected speaker
+  state.txGain=state.ctx.createGain();
+  state.txGain.gain.value=Number($('#txGain').value);
+
+  state.channelInput=state.ctx.createGain();
+  state.channelAtt=state.ctx.createGain();
+  state.channelPhaseDelay=state.ctx.createDelay(1.0);
+  state.channelDry=state.ctx.createGain();
+
+  state.echo1Delay=state.ctx.createDelay(1.0);
+  state.echo1Gain=state.ctx.createGain();
+  state.echo2Delay=state.ctx.createDelay(1.0);
+  state.echo2Gain=state.ctx.createGain();
+
+  state.hpFilter=state.ctx.createBiquadFilter();
+  state.hpFilter.type='highpass';
+  state.lpFilter=state.ctx.createBiquadFilter();
+  state.lpFilter.type='lowpass';
+
+  state.clipper=state.ctx.createWaveShaper();
+  state.clipper.oversample='4x';
+
+  state.fadeGain=state.ctx.createGain();
+  state.fadeGain.gain.value=1;
+
+  state.txDest=state.ctx.createMediaStreamDestination();
+
+  // Main path.
+  state.txGain.connect(state.channelInput);
+  state.channelInput.connect(state.channelAtt);
+  state.channelAtt.connect(state.channelPhaseDelay);
+  state.channelPhaseDelay.connect(state.channelDry);
+  state.channelDry.connect(state.hpFilter);
+  state.hpFilter.connect(state.lpFilter);
+  state.lpFilter.connect(state.clipper);
+  state.clipper.connect(state.fadeGain);
+  state.fadeGain.connect(state.txDest);
+
+  // Echo taps rejoin before band-limiting/nonlinearity.
+  state.channelInput.connect(state.echo1Delay);
+  state.echo1Delay.connect(state.echo1Gain);
+  state.echo1Gain.connect(state.hpFilter);
+  state.channelInput.connect(state.echo2Delay);
+  state.echo2Delay.connect(state.echo2Gain);
+  state.echo2Gain.connect(state.hpFilter);
+
+  createNoiseSource();
+
+  state.outputAudio.srcObject=state.txDest.stream;
+  await state.outputAudio.play();
+
+  state.rxGain=state.ctx.createGain();
+  state.rxGain.gain.value=dbToGain(Number($('#rxGain').value));
+  state.analyser=state.ctx.createAnalyser();
+  state.analyser.fftSize=Number($('#fftSize').value);
+  state.analyser.smoothingTimeConstant=0.15;
+  state.rxGain.connect(state.analyser);
+
+  await routeOutput($('#speakerSelect').value || state.selectedOutputId || '');
+  applyImpairments(false);
+  updateAudioInfo();
+}
+
+async function routeOutput(deviceId){
+  state.selectedOutputId=deviceId||'';
+  if('setSinkId' in state.outputAudio){
+    try{
+      await state.outputAudio.setSinkId(deviceId||'');
+      log(`Output routed to ${deviceId ? 'selected speaker' : 'system default'}.`);
+    }catch(e){
+      log(`Could not route selected speaker (${e.name}); using browser/system routing.`, 'warn');
+    }
+  }else{
+    log('setSinkId() unavailable; output uses system default.', 'warn');
+  }
+}
+
+async function openMic(){
+  closeMic();
+  const deviceId=$('#micSelect').value;
+  try{
+    state.micStream=await navigator.mediaDevices.getUserMedia({audio:rawConstraints(deviceId),video:false});
+    const track=state.micStream.getAudioTracks()[0];
+    state.micSource=state.ctx.createMediaStreamSource(state.micStream);
+    state.micSource.connect(state.rxGain);
+    const s=track.getSettings ? track.getSettings() : {};
+    $('#trackSettings').textContent='Actual input: '+JSON.stringify({
+      sampleRate:s.sampleRate, channelCount:s.channelCount,
+      echoCancellation:s.echoCancellation, noiseSuppression:s.noiseSuppression,
+      autoGainControl:s.autoGainControl, deviceId:s.deviceId
+    });
+    log('Microphone opened.');
+    await enumerateDevices();
+  }catch(e){
+    log(`${e.name}: ${e.message}`,'error');
+    throw e;
+  }
+}
+
+function closeMic(){
+  try{state.micSource?.disconnect()}catch{}
+  state.micSource=null;
+  state.micStream?.getTracks().forEach(t=>t.stop());
+  state.micStream=null;
+}
+
+async function startEngine(){
+  const role=$('#roleSelect').value;
+  try{
+    await createContext();
+    if(role==='rx' || role==='both') await openMic();
+    state.started=true;
+    $('#startBtn').disabled=true; $('#stopBtn').disabled=false;
+    updateRoleControls();
+    startAnalyzerLoop();
+    announcePresence();
+    log(`Audio engine started as ${role.toUpperCase()}.`);
+  }catch(e){
+    log(`Start failed: ${e.message}`,'error');
+    stopEngine();
+  }
+}
+
+function stopEngine(){
+  stopTone();
+  closeMic();
+  if(state.animationId) cancelAnimationFrame(state.animationId);
+  state.animationId=null;
+  stopImpairmentSources();
+  if(state.ctx){
+    state.ctx.close().catch(()=>{});
+  }
+  state.ctx=state.txDest=state.txGain=state.channelInput=state.channelDry=state.channelAtt=
+    state.channelPhaseDelay=state.echo1Delay=state.echo1Gain=state.echo2Delay=state.echo2Gain=
+    state.noiseSource=state.noiseGain=state.hpFilter=state.lpFilter=state.clipper=
+    state.fadeOsc=state.fadeGain=state.rxGain=state.analyser=null;
+  state.outputAudio.srcObject=null;
+  state.started=false;
+  $('#startBtn').disabled=false; $('#stopBtn').disabled=true;
+  updateRoleControls();
+  resetMetrics();
+  announcePresence();
+  log('Audio engine stopped.');
+}
+
+function updateRoleControls(){
+  const role=$('#roleSelect').value;
+  const tx=state.started&&(role==='tx'||role==='both');
+  const rx=state.started&&(role==='rx'||role==='both');
+  $('#toneStartBtn').disabled=!tx;
+  $('#chirpBtn').disabled=!tx;
+  $('#probeBtn').disabled=!tx;
+  $('#measureBtn').disabled=!rx;
+}
+
+function updateAudioInfo(){
+  if(!state.ctx) return;
+  const sr=state.ctx.sampleRate;
+  $('#sampleRateLabel').textContent=`Sample rate: ${sr} Hz`;
+  $('#nyquistLabel').textContent=`Nyquist: ${sr/2} Hz`;
+  $('#binLabel').textContent=`FFT resolution: ${(sr/state.analyser.fftSize).toFixed(2)} Hz/bin`;
+}
+
+function startTone(){
+  if(!state.ctx||state.continuousOsc) return;
+  const f=clamp(Number($('#toneFreq').value)||18500,20,state.ctx.sampleRate/2-50);
+  const osc=state.ctx.createOscillator();
+  osc.type='sine'; osc.frequency.value=f + Number($('#freqOffset').value || 0);
+  osc.connect(state.txGain); osc.start();
+  state.continuousOsc=osc;
+  $('#toneStartBtn').disabled=true; $('#toneStopBtn').disabled=false;
+  log(`Continuous tone started at ${f} Hz.`);
+}
+
+function stopTone(){
+  if(state.continuousOsc){
+    try{state.continuousOsc.stop()}catch{}
+    try{state.continuousOsc.disconnect()}catch{}
+    state.continuousOsc=null;
+    log('Continuous tone stopped.');
+  }
+  $('#toneStopBtn').disabled=true;
+  updateRoleControls();
+}
+
+function envelopeGain(start, duration, peak=1){
+  const g=state.ctx.createGain();
+  const t0=start, attack=Math.min(0.004,duration/5), release=Math.min(0.006,duration/4);
+  g.gain.setValueAtTime(0,t0);
+  g.gain.linearRampToValueAtTime(peak,t0+attack);
+  g.gain.setValueAtTime(peak,Math.max(t0+attack,t0+duration-release));
+  g.gain.linearRampToValueAtTime(0,t0+duration);
+  g.connect(state.txGain);
+  return g;
+}
+
+function scheduleTone(freq,start,duration,peak=0.9){
+  const osc=state.ctx.createOscillator();
+  const g=envelopeGain(start,duration,peak);
+  osc.type='sine'; osc.frequency.setValueAtTime(freq + Number($('#freqOffset').value || 0),start);
+  osc.connect(g); osc.start(start); osc.stop(start+duration+0.01);
+  osc.onended=()=>{try{osc.disconnect();g.disconnect()}catch{}};
+}
+
+function scheduleChirp(startHz,endHz,start,duration){
+  const osc=state.ctx.createOscillator();
+  const g=envelopeGain(start,duration,0.85);
+  osc.type='sine';
+  const off=Number($('#freqOffset').value || 0);
+  osc.frequency.setValueAtTime(startHz+off,start);
+  osc.frequency.linearRampToValueAtTime(endHz+off,start+duration);
+  osc.connect(g); osc.start(start); osc.stop(start+duration+0.01);
+  osc.onended=()=>{try{osc.disconnect();g.disconnect()}catch{}};
+}
+
+function sendChirp(){
+  if(!state.ctx) return;
+  const a=Number($('#chirpStart').value), b=Number($('#chirpEnd').value);
+  const d=clamp(Number($('#chirpDuration').value)/1000,0.005,2);
+  const start=state.ctx.currentTime+0.05;
+  scheduleChirp(a,b,start,d);
+  log(`Chirp sent: ${a} → ${b} Hz, ${(d*1000).toFixed(0)} ms.`);
+}
+
+function fskFreqs(){return $$('.fskFreq').map(x=>Number(x.value))}
+function updateFskLabels(){
+  fskFreqs().forEach((f,i)=>$('#fskHz'+i).textContent=`${f} Hz`);
+}
+
+function sendProbe(){
+  if(!state.ctx) return;
+  const a=Number($('#chirpStart').value), b=Number($('#chirpEnd').value);
+  const cd=clamp(Number($('#chirpDuration').value)/1000,0.005,2);
+  let t=state.ctx.currentTime+0.08;
+  scheduleChirp(a,b,t,cd);
+  t+=cd+0.05;
+  const symbolDur=0.100, gap=0.015, ff=fskFreqs();
+  for(let r=0;r<2;r++){
+    ff.forEach(f=>{scheduleTone(f,t,symbolDur,0.85);t+=symbolDur+gap});
+  }
+  log(`Probe sent: chirp + ${ff.join(', ')} Hz ×2.`);
+}
+
+
+function makeClipCurve(drive){
+  // Soft saturation. drive=1 is effectively close to clean; higher values increase compression/clipping.
+  const n=4096, curve=new Float32Array(n);
+  const k=Math.max(0.001, Number(drive));
+  const norm=Math.tanh(k);
+  for(let i=0;i<n;i++){
+    const x=i*2/(n-1)-1;
+    curve[i]=Math.tanh(k*x)/norm;
+  }
+  return curve;
+}
+
+function createNoiseSource(){
+  if(!state.ctx || !state.txDest) return;
+  try{state.noiseSource?.stop()}catch{}
+  const seconds=2;
+  const buf=state.ctx.createBuffer(1, Math.floor(state.ctx.sampleRate*seconds), state.ctx.sampleRate);
+  const data=buf.getChannelData(0);
+  // Deterministic-ish white noise is unnecessary here; the receiver metrics quantify the actual result.
+  for(let i=0;i<data.length;i++) data[i]=Math.random()*2-1;
+  state.noiseSource=state.ctx.createBufferSource();
+  state.noiseSource.buffer=buf;
+  state.noiseSource.loop=true;
+  state.noiseGain=state.ctx.createGain();
+  state.noiseGain.gain.value=0;
+  state.noiseSource.connect(state.noiseGain);
+  state.noiseGain.connect(state.hpFilter);
+  state.noiseSource.start();
+}
+
+function stopImpairmentSources(){
+  try{state.noiseSource?.stop()}catch{}
+  try{state.fadeOsc?.stop()}catch{}
+  state.noiseSource=null;
+  state.fadeOsc=null;
+}
+
+function phaseDelaySeconds(deg, refHz){
+  // Equivalent positive delay for requested phase angle at reference frequency.
+  // Phase = -360*f*t. Wrap to a non-negative sub-cycle delay because DelayNode cannot advance time.
+  if(!Number.isFinite(deg)||!Number.isFinite(refHz)||refHz<=0) return 0;
+  let wrapped=(((-deg)%360)+360)%360;
+  return wrapped/(360*refHz);
+}
+
+function setFade(depthDb, rateHz){
+  if(!state.ctx || !state.fadeGain) return;
+  try{state.fadeOsc?.stop()}catch{}
+  state.fadeOsc=null;
+
+  depthDb=Math.max(0, Number(depthDb)||0);
+  rateHz=Math.max(0.01, Number(rateHz)||0.5);
+  if(depthDb<=0.01){
+    state.fadeGain.gain.cancelScheduledValues(state.ctx.currentTime);
+    state.fadeGain.gain.setValueAtTime(1,state.ctx.currentTime);
+    return;
+  }
+
+  // Gain swings approximately from 1 down to 10^(-depth/20).
+  const minG=dbToGain(-depthDb), center=(1+minG)/2, amp=(1-minG)/2;
+  state.fadeGain.gain.cancelScheduledValues(state.ctx.currentTime);
+  state.fadeGain.gain.setValueAtTime(center,state.ctx.currentTime);
+
+  const osc=state.ctx.createOscillator();
+  const mod=state.ctx.createGain();
+  osc.type='sine';
+  osc.frequency.value=rateHz;
+  mod.gain.value=amp;
+  osc.connect(mod);
+  mod.connect(state.fadeGain.gain);
+  osc.start();
+  state.fadeOsc=osc;
+}
+
+function impairmentValues(){
+  return {
+    att:Number($('#channelAtt').value),
+    fadeDepth:Number($('#fadeDepth').value),
+    fadeRate:Number($('#fadeRate').value),
+    e1d:Number($('#echo1Delay').value),
+    e1g:Number($('#echo1Gain').value),
+    e2d:Number($('#echo2Delay').value),
+    e2g:Number($('#echo2Gain').value),
+    phase:Number($('#phaseDeg').value),
+    phaseRef:Number($('#phaseRef').value),
+    freqOffset:Number($('#freqOffset').value),
+    noise:Number($('#noiseGain').value),
+    hp:Number($('#hpCut').value),
+    lp:Number($('#lpCut').value),
+    clip:Number($('#clipDrive').value)
+  };
+}
+
+function updateImpairmentLabels(){
+  const v=impairmentValues();
+  $('#attLabel').textContent=`${v.att>0?'+':''}${v.att} dB`;
+  $('#fadeDepthLabel').textContent=`${v.fadeDepth} dB`;
+  $('#noiseGainLabel').textContent=v.noise<=-89?'Off':`${v.noise} dBFS-ish`;
+  $('#clipDriveLabel').textContent=v.clip<=1.01?'Off':`${v.clip.toFixed(1)}×`;
+}
+
+function summarizeImpairments(v){
+  const parts=[];
+  if(v.att!==0) parts.push(`level ${v.att} dB`);
+  if(v.fadeDepth>0) parts.push(`fade ${v.fadeDepth} dB @ ${v.fadeRate} Hz`);
+  if(v.e1g>-59) parts.push(`echo1 ${v.e1d} ms/${v.e1g} dB`);
+  if(v.e2g>-59) parts.push(`echo2 ${v.e2d} ms/${v.e2g} dB`);
+  if(v.phase!==0) parts.push(`phase ${v.phase}° @ ${v.phaseRef} Hz`);
+  if(v.freqOffset!==0) parts.push(`Δf ${v.freqOffset} Hz`);
+  if(v.noise>-89) parts.push(`noise ${v.noise} dB`);
+  if(v.hp>20 || v.lp<23000) parts.push(`band ${v.hp}-${v.lp} Hz`);
+  if(v.clip>1.01) parts.push(`clip ${v.clip.toFixed(1)}×`);
+  return parts.length?parts.join(' · '):'Clean / bypass';
+}
+
+function applyImpairments(doLog=true){
+  updateImpairmentLabels();
+  const v=impairmentValues();
+  $('#impairSummary').textContent=summarizeImpairments(v);
+  $('#impairState').textContent = summarizeImpairments(v)==='Clean / bypass' ? 'Clean' : 'Impaired';
+
+  if(!state.ctx || !state.channelAtt){
+    if(doLog) log('Impairment settings stored; they will apply when the audio engine starts.');
+    return;
+  }
+
+  const now=state.ctx.currentTime;
+  state.channelAtt.gain.setTargetAtTime(dbToGain(v.att),now,0.01);
+
+  const pd=clamp(phaseDelaySeconds(v.phase,v.phaseRef),0,0.5);
+  state.channelPhaseDelay.delayTime.setTargetAtTime(pd,now,0.002);
+
+  state.echo1Delay.delayTime.setTargetAtTime(clamp(v.e1d/1000,0,0.5),now,0.002);
+  state.echo1Gain.gain.setTargetAtTime(v.e1g<=-59?0:dbToGain(v.e1g),now,0.01);
+  state.echo2Delay.delayTime.setTargetAtTime(clamp(v.e2d/1000,0,0.5),now,0.002);
+  state.echo2Gain.gain.setTargetAtTime(v.e2g<=-59?0:dbToGain(v.e2g),now,0.01);
+
+  if(state.noiseGain) state.noiseGain.gain.setTargetAtTime(v.noise<=-89?0:dbToGain(v.noise),now,0.01);
+
+  state.hpFilter.frequency.setTargetAtTime(clamp(v.hp,20,state.ctx.sampleRate/2-100),now,0.01);
+  state.lpFilter.frequency.setTargetAtTime(clamp(v.lp,100,state.ctx.sampleRate/2-50),now,0.01);
+  state.hpFilter.Q.value=0.707;
+  state.lpFilter.Q.value=0.707;
+
+  state.clipper.curve=makeClipCurve(v.clip);
+  setFade(v.fadeDepth,v.fadeRate);
+
+  if(doLog) log(`Impairments applied: ${summarizeImpairments(v)}`);
+}
+
+function setPreset(name){
+  const presets={
+    clean:{att:0,fadeDepth:0,fadeRate:.5,e1d:0,e1g:-60,e2d:0,e2g:-60,phase:0,phaseRef:18500,freqOffset:0,noise:-90,hp:20,lp:23000,clip:1},
+    mild:{att:-4,fadeDepth:2,fadeRate:.4,e1d:3.5,e1g:-18,e2d:8,e2g:-28,phase:12,phaseRef:18500,freqOffset:0,noise:-55,hp:120,lp:20500,clip:1},
+    echo:{att:-3,fadeDepth:0,fadeRate:.5,e1d:5,e1g:-6,e2d:13,e2g:-10,phase:0,phaseRef:18500,freqOffset:0,noise:-70,hp:50,lp:22000,clip:1},
+    noisy:{att:-10,fadeDepth:0,fadeRate:.5,e1d:0,e1g:-60,e2d:0,e2g:-60,phase:0,phaseRef:18500,freqOffset:0,noise:-35,hp:20,lp:23000,clip:1},
+    phase:{att:0,fadeDepth:0,fadeRate:.5,e1d:0,e1g:-60,e2d:0,e2g:-60,phase:90,phaseRef:18500,freqOffset:25,noise:-90,hp:20,lp:23000,clip:1},
+    fade:{att:-3,fadeDepth:15,fadeRate:1.2,e1d:0,e1g:-60,e2d:0,e2g:-60,phase:0,phaseRef:18500,freqOffset:0,noise:-65,hp:20,lp:23000,clip:1},
+    clip:{att:4,fadeDepth:0,fadeRate:.5,e1d:0,e1g:-60,e2d:0,e2g:-60,phase:0,phaseRef:18500,freqOffset:0,noise:-90,hp:20,lp:23000,clip:8},
+    band:{att:-3,fadeDepth:0,fadeRate:.5,e1d:0,e1g:-60,e2d:0,e2g:-60,phase:0,phaseRef:18500,freqOffset:0,noise:-70,hp:16500,lp:19500,clip:1}
+  };
+  const p=presets[name];
+  if(!p) return;
+  $('#channelAtt').value=p.att;
+  $('#fadeDepth').value=p.fadeDepth;
+  $('#fadeRate').value=p.fadeRate;
+  $('#echo1Delay').value=p.e1d;
+  $('#echo1Gain').value=p.e1g;
+  $('#echo2Delay').value=p.e2d;
+  $('#echo2Gain').value=p.e2g;
+  $('#phaseDeg').value=p.phase;
+  $('#phaseRef').value=p.phaseRef;
+  $('#freqOffset').value=p.freqOffset;
+  $('#noiseGain').value=p.noise;
+  $('#hpCut').value=p.hp;
+  $('#lpCut').value=p.lp;
+  $('#clipDrive').value=p.clip;
+  updateImpairmentLabels();
+  applyImpairments();
+}
+
+
+function resetMetrics(){
+  ['rmsMetric','peakMetric','freqMetric','toneMetric','noiseMetric','snrMetric'].forEach(id=>$('#'+id).innerHTML='—');
+  $('#fskWinner').textContent='—';
+  for(let i=0;i<4;i++) $('#fskDb'+i).textContent='—';
+  $('#levelBar').style.width='0%';
+}
+
+function percentile(arr,p){
+  if(!arr.length) return NaN;
+  const a=arr.slice().sort((x,y)=>x-y);
+  return a[Math.floor((a.length-1)*p)];
+}
+
+function startAnalyzerLoop(){
+  if(state.animationId) cancelAnimationFrame(state.animationId);
+  const loop=()=>{
+    analyzeFrame();
+    state.animationId=requestAnimationFrame(loop);
+  };
+  loop();
+}
+
+function analyzeFrame(){
+  if(!state.analyser||!state.micStream) return;
+  const an=state.analyser, sr=state.ctx.sampleRate, n=an.fftSize;
+  const td=new Float32Array(n);
+  const fd=new Float32Array(an.frequencyBinCount);
+  an.getFloatTimeDomainData(td);
+  an.getFloatFrequencyData(fd);
+
+  let ss=0, peak=0;
+  for(const x of td){ss+=x*x; peak=Math.max(peak,Math.abs(x))}
+  const rms=Math.sqrt(ss/td.length), rmsDb=ampToDb(rms), peakDb=ampToDb(peak);
+
+  const lo=clamp(Number($('#bandStart').value)||0,0,sr/2);
+  const hi=clamp(Number($('#bandEnd').value)||sr/2,lo+1,sr/2);
+  const binHz=sr/n;
+  const i0=clamp(Math.ceil(lo/binHz),0,fd.length-1);
+  const i1=clamp(Math.floor(hi/binHz),i0,fd.length-1);
+
+  let maxDb=-Infinity,maxI=i0;
+  const noiseBins=[];
+  for(let i=i0;i<=i1;i++){
+    if(fd[i]>maxDb){maxDb=fd[i];maxI=i}
+  }
+  const guard=Math.max(2,Math.round(100/binHz));
+  for(let i=i0;i<=i1;i++) if(Math.abs(i-maxI)>guard && Number.isFinite(fd[i])) noiseBins.push(fd[i]);
+  const noise=percentile(noiseBins,0.50);
+  const snr=maxDb-noise;
+  const dom=maxI*binHz;
+
+  const fsk=fskFreqs().map((f,idx)=>{
+    const ii=clamp(Math.round(f/binHz),0,fd.length-1);
+    let v=-Infinity;
+    for(let k=Math.max(0,ii-1);k<=Math.min(fd.length-1,ii+1);k++) v=Math.max(v,fd[k]);
+    $('#fskDb'+idx).textContent=`${fmt(v,1)} dBFS`;
+    return v;
+  });
+  const wi=fsk.indexOf(Math.max(...fsk));
+  $('#fskWinner').textContent = Number.isFinite(fsk[wi]) ? `${['00','01','10','11'][wi]} / F${wi} (${fmt(fsk[wi],1)} dBFS)` : '—';
+
+  $('#rmsMetric').innerHTML=`${fmt(rmsDb,1)} <small>dBFS</small>`;
+  $('#peakMetric').innerHTML=`${fmt(peakDb,1)} <small>dBFS</small>`;
+  $('#freqMetric').innerHTML=`${fmt(dom,0)} <small>Hz</small>`;
+  $('#toneMetric').innerHTML=`${fmt(maxDb,1)} <small>dBFS</small>`;
+  $('#noiseMetric').innerHTML=`${fmt(noise,1)} <small>dBFS</small>`;
+  $('#snrMetric').innerHTML=`${fmt(snr,1)} <small>dB</small>`;
+  $('#levelBar').style.width=`${clamp((rmsDb+80)/80*100,0,100)}%`;
+
+  state.latestMetrics={rmsDb,peakDb,dom,maxDb,noise,snr,fsk};
+  if(state.measuring) state.measureSamples.push(state.latestMetrics);
+
+  drawSpectrum(fd,sr,n,lo,hi);
+}
+
+function drawSpectrum(fd,sr,n,lo,hi){
+  const c=$('#spectrum'), ctx=c.getContext('2d'), W=c.width, H=c.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#090c0f';ctx.fillRect(0,0,W,H);
+
+  // grid
+  ctx.strokeStyle='#25303a';ctx.lineWidth=1;ctx.fillStyle='#7f8a95';ctx.font='12px system-ui';
+  for(let k=0;k<=6;k++){
+    const y=k*H/6; ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+    ctx.fillText(`${(-20*k).toFixed(0)} dB`,4,Math.max(12,y-3));
+  }
+  const nyq=sr/2;
+  for(let f=0;f<=nyq;f+=2000){
+    const x=f/nyq*W;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+    ctx.fillText(`${(f/1000).toFixed(0)}k`,x+2,H-5);
+  }
+  // analysis band
+  ctx.fillStyle='rgba(120,169,255,.08)';
+  ctx.fillRect(lo/nyq*W,0,(hi-lo)/nyq*W,H);
+
+  // spectrum
+  ctx.strokeStyle='#78a9ff';ctx.lineWidth=1.3;ctx.beginPath();
+  const minDb=-120,maxDb=0;
+  const step=Math.max(1,Math.floor(fd.length/W));
+  for(let i=0;i<fd.length;i+=step){
+    const f=i*sr/n, x=f/nyq*W;
+    const db=clamp(fd[i],minDb,maxDb), y=(maxDb-db)/(maxDb-minDb)*H;
+    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // FSK markers
+  ctx.strokeStyle='#62d394';ctx.fillStyle='#62d394';
+  fskFreqs().forEach((f,i)=>{
+    const x=f/nyq*W;if(x<0||x>W)return;
+    ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+    ctx.fillText(`F${i}`,x+3,14+i*14);
+  });
+}
+
+function startMeasurement(){
+  if(!state.micStream){log('Receiver is not running.','warn');return}
+  if(state.measuring)return;
+  state.measuring=true; state.measureSamples=[];
+  $('#measureBtn').disabled=true;
+  $('#measurementResult').textContent='measuring…';
+  log('5-second link measurement started.');
+  setTimeout(()=>{
+    state.measuring=false;
+    const a=state.measureSamples;
+    $('#measureBtn').disabled=false;
+    if(!a.length){$('#measurementResult').textContent='no samples';return}
+    const avg=k=>a.reduce((s,x)=>s+x[k],0)/a.length;
+    const max=k=>Math.max(...a.map(x=>x[k]));
+    const result=`avg RMS ${fmt(avg('rmsDb'),1)} dBFS · avg SNR ${fmt(avg('snr'),1)} dB · best SNR ${fmt(max('snr'),1)} dB · dominant ${fmt(avg('dom'),0)} Hz`;
+    $('#measurementResult').textContent=result;
+    log(`Measurement: ${result}`);
+  },5000);
+}
+
+function applyFftSize(){
+  if(state.analyser){
+    state.analyser.fftSize=Number($('#fftSize').value);
+    updateAudioInfo();
+    log(`FFT size set to ${state.analyser.fftSize}.`);
+  }
+}
+
+function updateGainLabels(){
+  const tx=Number($('#txGain').value);
+  $('#txGainLabel').textContent=`${Math.round(tx*100)}%`;
+  if(state.txGain) state.txGain.gain.setTargetAtTime(tx,state.ctx.currentTime,0.01);
+  const rxdb=Number($('#rxGain').value);
+  $('#rxGainLabel').textContent=`${rxdb>0?'+':''}${rxdb} dB`;
+  if(state.rxGain) state.rxGain.gain.setTargetAtTime(dbToGain(rxdb),state.ctx.currentTime,0.01);
+}
+
+async function restartMicForSelection(){
+  if(!state.started) return;
+  const role=$('#roleSelect').value;
+  if(role==='rx'||role==='both'){
+    try{await openMic()}catch{}
+  }
+}
+async function rerouteSpeaker(){
+  if(state.started) await routeOutput($('#speakerSelect').value);
+}
+
+function roleChanged(){
+  updateRoleControls();
+  announcePresence();
+  if(state.started){
+    log('Role changed while running; restart audio engine to fully apply device capture changes.','warn');
+  }
+}
+
+// Same-device lab presence only — never carries modem payload/audio.
+let bc=null;
+try{
+  bc=new BroadcastChannel('modemjs-io-lab-presence-v01');
+  bc.onmessage=e=>{
+    const m=e.data||{};
+    if(m.type==='presence' && m.id!==instanceId){
+      state.peers.set(m.id,{role:m.role,started:m.started,seen:Date.now()});
+      renderPeers();
+    }
+  };
+}catch{}
+function announcePresence(){
+  if(bc) bc.postMessage({type:'presence',id:instanceId,role:$('#roleSelect').value,started:state.started});
+  renderPeers();
+}
+function renderPeers(){
+  const now=Date.now();
+  for(const [id,p] of state.peers) if(now-p.seen>7000) state.peers.delete(id);
+  const peers=[...state.peers.entries()];
+  $('#peerState').textContent=`Local ModemJS instances: ${1+peers.length}`+
+    (peers.length?` · peers: ${peers.map(([id,p])=>`${id} ${p.role.toUpperCase()}${p.started?' active':''}`).join(', ')}`:'');
+}
+setInterval(()=>{announcePresence();renderPeers()},2500);
+
+$('#refreshBtn').addEventListener('click',enumerateDevices);
+$('#micPermissionBtn').addEventListener('click',()=>requestMicPermission().catch(e=>log(`${e.name}: ${e.message}`,'error')));
+$('#outputPermissionBtn').addEventListener('click',chooseOutput);
+$('#startBtn').addEventListener('click',startEngine);
+$('#stopBtn').addEventListener('click',stopEngine);
+$('#roleSelect').addEventListener('change',roleChanged);
+$('#micSelect').addEventListener('change',restartMicForSelection);
+$('#speakerSelect').addEventListener('change',rerouteSpeaker);
+$('#txGain').addEventListener('input',updateGainLabels);
+$('#rxGain').addEventListener('input',updateGainLabels);
+$('#toneStartBtn').addEventListener('click',startTone);
+$('#toneStopBtn').addEventListener('click',stopTone);
+$('#chirpBtn').addEventListener('click',sendChirp);
+$('#probeBtn').addEventListener('click',sendProbe);
+$('#fftSize').addEventListener('change',applyFftSize);
+$('#measureBtn').addEventListener('click',startMeasurement);
+$('#clearLogBtn').addEventListener('click',()=>$('#log').textContent='');
+$('#applyImpairBtn').addEventListener('click',()=>applyImpairments(true));
+$('#resetImpairBtn').addEventListener('click',()=>{
+  $('#impairPreset').value='clean';
+  setPreset('clean');
+});
+$('#impairPreset').addEventListener('change',e=>{
+  if(e.target.value!=='custom') setPreset(e.target.value);
+});
+['channelAtt','fadeDepth','noiseGain','clipDrive'].forEach(id=>
+  $('#'+id).addEventListener('input',()=>{
+    updateImpairmentLabels();
+    $('#impairPreset').value='custom';
+  })
+);
+['fadeRate','echo1Delay','echo1Gain','echo2Delay','echo2Gain','phaseDeg','phaseRef','freqOffset','hpCut','lpCut'].forEach(id=>
+  $('#'+id).addEventListener('input',()=>{$('#impairPreset').value='custom';})
+);
+$$('.fskFreq').forEach(x=>x.addEventListener('input',updateFskLabels));
+navigator.mediaDevices?.addEventListener?.('devicechange',enumerateDevices);
+window.addEventListener('beforeunload',()=>{try{bc?.close()}catch{}; closeMic()});
+
+assertBrowser();
+updateGainLabels();
+updateFskLabels();
+updateImpairmentLabels();
+applyImpairments(false);
+updateRoleControls();
+enumerateDevices();
+announcePresence();
+log('ModemJS I/O Lab loaded.');
+})();
+</script>
+</body>
+</html>
